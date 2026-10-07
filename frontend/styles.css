@@ -351,9 +351,9 @@ input, select, textarea { font-family: inherit; }
 
 .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--line); border-radius: var(--r); }
 
-table.rank { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); min-width: 700px; }
+table.rank { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); min-width: 680px; }
 
-table.rank th, table.rank td { padding: 9px 10px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: middle; }
+table.rank th, table.rank td { padding: 8px 9px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: middle; }
 
 table.rank thead th {
   position: sticky;
@@ -382,7 +382,7 @@ table.rank tbody tr.off { opacity: 0.6; }
 
 table.rank tbody tr.off:hover { opacity: 1; }
 
-.cell-listing { display: flex; align-items: center; gap: 10px; min-width: 200px; }
+.cell-listing { display: flex; align-items: center; gap: 10px; min-width: 168px; }
 
 .cell-listing img { width: 46px; height: 46px; border-radius: 8px; object-fit: cover; flex: none; background: var(--panel-2); }
 

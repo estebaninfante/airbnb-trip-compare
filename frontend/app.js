@@ -62,6 +62,11 @@ function cop(usd) {
   return "$" + Math.round(Number(usd) * (state.fx || 4000)).toLocaleString("es-CO") + " COP";
 }
 
+function copc(usd) {
+  if (usd == null) return "—";
+  return "$" + Math.round(Number(usd) * (state.fx || 4000)).toLocaleString("es-CO");
+}
+
 function people() {
   const n = parseInt(localStorage.getItem("atc_people") || "11", 10);
   return n > 0 ? n : 11;
@@ -290,7 +295,7 @@ function tableHTML(rows) {
             ${th("rank", "#")}
             ${th("name", "Alojamiento")}
             ${th("capacity", "Cap.")}
-            <th class="no-sort">Hab · Camas · Baños</th>
+            <th class="no-sort">Hab·Cam·Baños</th>
             ${th("pricePPN", "COP total")}
             ${th("rating", "Rating")}
             ${th("safety", "Seguridad")}
@@ -317,7 +322,7 @@ function tableHTML(rows) {
               </td>
               <td class="num">${row.capacity || "—"}</td>
               <td class="num">${row.bedrooms || "—"} · ${row.beds || "—"} · ${row.baths || "—"}</td>
-              <td class="num">${row.priceAvailable === false ? "<span class='chip'>n/d</span>" : `${cop(totalPrice(row))}<br><span class="faint" style="font-size:var(--fs-xs)">${cop(perPersonNight(row))} /persona</span>`}</td>
+              <td class="num" style="white-space:nowrap">${row.priceAvailable === false ? "<span class='chip'>n/d</span>" : `${copc(totalPrice(row))}<br><span class="faint" style="font-size:var(--fs-xs)">${copc(perPersonNight(row))} /persona</span>`}</td>
               <td class="num">${row.rating != null ? Number(row.rating).toFixed(2) : "—"}</td>
               <td class="num">${row.safety != null ? Number(row.safety).toFixed(1) : "—"}</td>
               <td class="num">${row.walkScore != null ? Number(row.walkScore).toFixed(1) : "—"}</td>
