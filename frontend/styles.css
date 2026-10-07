@@ -108,6 +108,8 @@ input, select, textarea { font-family: inherit; }
 
 .topbar-spacer { flex: 1 1 auto; }
 
+.topbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
 .identity {
   display: flex;
   align-items: center;
@@ -577,10 +579,18 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 @keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 
 @media (max-width: 640px) {
-  .container { padding: 16px 14px 56px; }
-  .topbar-inner { padding: 12px 14px; }
+  .container { padding: 14px 12px 48px; }
+  .topbar-inner { padding: 10px 12px; gap: 10px; }
   .brand-sub { display: none; }
-  .identity input { width: 90px; }
+  .topbar-actions { width: 100%; }
+  .identity { flex: 1 1 auto; min-width: 0; padding: 5px 6px 5px 12px; }
+  .identity input { width: auto; flex: 1 1 auto; min-width: 0; }
+  .segments { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 -12px; padding: 2px 12px 14px; }
+  .seg-tab { flex: 0 0 auto; }
+  .panel { padding: 14px; }
+  .panel-head { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .add-row { flex-direction: column; align-items: stretch; }
+  .add-row .input, .add-row .select { flex: 1 1 auto; width: 100%; }
   .modal-backdrop { padding: 0; align-items: stretch; }
   .modal { max-width: none; border-radius: 0; min-height: 100%; }
 }

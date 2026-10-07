@@ -62,6 +62,24 @@ function cop(usd) {
   return "$" + Math.round(Number(usd) * (state.fx || 4000)).toLocaleString("es-CO") + " COP";
 }
 
+function people() {
+  const n = parseInt(localStorage.getItem("atc_people") || "11", 10);
+  return n > 0 ? n : 11;
+}
+
+function perPersonNight(row) {
+  const p = people();
+  if (row.pricePerNight != null) return row.pricePerNight / p;
+  if (row.pricePPN != null) return (row.pricePPN * 11) / p;
+  return null;
+}
+
+function totalPrice(row) {
+  if (row.priceTotal != null) return row.priceTotal;
+  if (row.pricePerNight != null) return row.pricePerNight * (nightsOf(currentSeg()) || 0);
+  return null;
+}
+
 function fmtDate(iso) {
   if (!iso) return "";
   const months = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
@@ -152,15 +170,21 @@ function topbarHTML() {
           </div>
           <div class="brand-text">
             <div class="brand-title">${esc(state.trip ? state.trip.name : "Comparador de alojamientos")}</div>
-            <div class="brand-sub">30 dic – 10 ene · ${state.trip ? state.trip.group.total : 11} personas · ${state.trip ? state.trip.group.couples : 5} parejas + 1</div>
+            <div class="brand-sub">30 dic – 10 ene · ${people()} personas · ${state.trip ? state.trip.group.couples : 5} parejas + 1</div>
           </div>
         </div>
         <div class="topbar-spacer"></div>
-        <div class="identity">
-          <label for="who">Yo soy</label>
-          <input id="who" type="text" placeholder="tu nombre" value="${esc(person())}" />
+        <div class="topbar-actions">
+          <div class="identity">
+            <label for="who">Voto como</label>
+            <input id="who" type="text" placeholder="tu nombre" value="${esc(person())}" />
+          </div>
+          <div class="identity">
+            <label for="people">Personas</label>
+            <input id="people" type="number" min="1" max="30" inputmode="numeric" value="${people()}" />
+          </div>
+          <button class="btn" id="refresh">Actualizar</button>
         </div>
-        <button class="btn" id="refresh">Actualizar</button>
       </div>
     </header>`;
 }
@@ -202,7 +226,7 @@ function cardHTML(row) {
   const img = row.image || (l.images || [])[0];
     const price = row.priceAvailable === false
       ? `<span class="chip">Precio no disponible</span>`
-    : (row.pricePPN != null ? `<div class="card-price">${cop(row.pricePPN)} <small>/ persona · noche</small></div>` : "");
+    : (totalPrice(row) != null ? `<div class="card-price">${cop(totalPrice(row))} <small>total · ${cop(perPersonNight(row))} por persona</small></div>` : "");
   const rooms = [row.bedrooms ? `${row.bedrooms} hab` : null, row.beds ? `${row.beds} camas` : null, row.baths ? `${row.baths} baños` : null].filter(Boolean).join(" · ");
   return `
     <article class="card" data-detail="${row.id}">
@@ -267,7 +291,7 @@ function tableHTML(rows) {
             ${th("name", "Alojamiento")}
             ${th("capacity", "Cap.")}
             <th class="no-sort">Hab · Camas · Baños</th>
-            ${th("pricePPN", "COP/ppn")}
+            ${th("pricePPN", "COP total")}
             ${th("rating", "Rating")}
             ${th("safety", "Seguridad")}
             ${th("walkScore", "Entorno")}
@@ -293,7 +317,7 @@ function tableHTML(rows) {
               </td>
               <td class="num">${row.capacity || "—"}</td>
               <td class="num">${row.bedrooms || "—"} · ${row.beds || "—"} · ${row.baths || "—"}</td>
-              <td class="num">${row.priceAvailable === false ? "<span class='chip'>n/d</span>" : cop(row.pricePPN)}</td>
+              <td class="num">${row.priceAvailable === false ? "<span class='chip'>n/d</span>" : `${cop(totalPrice(row))}<br><span class="faint" style="font-size:var(--fs-xs)">${cop(perPersonNight(row))} /persona</span>`}</td>
               <td class="num">${row.rating != null ? Number(row.rating).toFixed(2) : "—"}</td>
               <td class="num">${row.safety != null ? Number(row.safety).toFixed(1) : "—"}</td>
               <td class="num">${row.walkScore != null ? Number(row.walkScore).toFixed(1) : "—"}</td>
@@ -386,8 +410,8 @@ function detailHTML() {
       </div>
       ${row.priceAvailable === false
         ? `<div class="inline-msg" style="color:var(--warn)">Precio no disponible para estas fechas (${esc((l.price && l.price.reason) || "")}).</div>`
-        : `<div style="margin-top:10px;font-weight:700">${cop(row.pricePPN)} <small class="muted" style="font-weight:400">/ persona · noche</small></div>
-           <div class="muted" style="font-size:var(--fs-sm)">Total ${cop(row.priceTotal)} · ${cop(row.pricePerNight)}/noche</div>`}
+        : `<div style="margin-top:10px;font-weight:700;font-size:var(--fs-xl)">${cop(totalPrice(row))} <small class="muted" style="font-weight:400;font-size:var(--fs-sm)">total</small></div>
+           <div class="muted" style="font-size:var(--fs-sm)">${cop(perPersonNight(row))} por persona · ${cop(row.pricePerNight)} / noche</div>`}
       ${routes ? `<div class="detail"><h4>Tiempos a puntos clave</h4><div class="routes">${routes}</div></div>` : ""}
       ${amenities ? `<div class="detail"><h4>Servicios</h4><div class="amenities">${amenities}</div></div>` : ""}
       <div class="detail">
@@ -500,6 +524,14 @@ function bind() {
   if (who) who.addEventListener("change", () => {
     localStorage.setItem(PERSON_KEY, who.value.trim());
     toast(who.value.trim() ? `Identidad: ${who.value.trim()}` : "Identidad borrada");
+    render();
+  });
+
+  const peopleInput = app.querySelector("#people");
+  if (peopleInput) peopleInput.addEventListener("change", () => {
+    const n = Math.max(1, parseInt(peopleInput.value, 10) || 11);
+    localStorage.setItem("atc_people", String(n));
+    toast(`Precio por persona calculado para ${n} personas`);
     render();
   });
 
