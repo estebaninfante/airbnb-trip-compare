@@ -121,6 +121,33 @@ def _name_from_html(html):
         return {}
 
 
+def _overview_from_html(html):
+    out = {}
+    try:
+        m = re.search(r'"overview":\{"__typename":"StaysPdpOverview".*?"items":(\[[^\]]*\])', html, re.S)
+        if not m:
+            return out
+        items = json.loads(m.group(1))
+        out["overview"] = items
+        for it in items:
+            low = it.lower()
+            num = re.search(r"(\d+(?:[.,]\d+)?)", low)
+            if not num:
+                continue
+            val = float(num.group(1).replace(",", "."))
+            if "huésped" in low or "huesped" in low or "guest" in low or "persona" in low:
+                out["capacityOverview"] = int(val)
+            elif "habitacion" in low or "habitación" in low or "recámara" in low or "recamara" in low or "bedroom" in low:
+                out["bedrooms"] = int(val)
+            elif "cama" in low or "bed" in low:
+                out["beds"] = int(val)
+            elif "baño" in low or "bano" in low or "bath" in low:
+                out["baths"] = val
+    except Exception:
+        pass
+    return out
+
+
 _AIRBNB_LOCK = threading.Lock()
 _last_airbnb_request = [0.0]
 
@@ -169,6 +196,7 @@ def _details_from_html(url):
     except Exception:
         data["reviews"] = []
     data["_pdp"] = _name_from_html(html)
+    data["_pdp"].update(_overview_from_html(html))
     return data
 
 
@@ -203,6 +231,10 @@ def fetch_details(url):
         "lat": coords.get("latitude"),
         "lng": coords.get("longitude"),
         "personCapacity": details.get("person_capacity"),
+        "bedrooms": pdp.get("bedrooms"),
+        "beds": pdp.get("beds"),
+        "baths": pdp.get("baths"),
+        "overview": pdp.get("overview") or [],
         "roomType": details.get("room_type"),
         "propertyType": pdp.get("propertyType"),
         "isSuperhost": bool(details.get("is_super_host")),
@@ -215,13 +247,32 @@ def fetch_details(url):
     }
 
 
+def _num(value):
+    if isinstance(value, (int, float)):
+        return float(value)
+    if not value:
+        return None
+    m = re.search(r"(\d[\d.,]*)", str(value).replace(" ", ""))
+    if not m:
+        return None
+    try:
+        return float(m.group(1).replace(",", ""))
+    except Exception:
+        return None
+
+
 def fetch_price(room_id, seg, capacity=None):
-    adults = 11
+    group = int(TRIP["group"]["total"])
+    adults = group
     if capacity:
         try:
-            adults = max(1, min(11, int(capacity)))
+            adults = max(1, min(group, int(capacity)))
         except Exception:
-            adults = 11
+            adults = group
+    try:
+        nights = (date.fromisoformat(seg["check_out"]) - date.fromisoformat(seg["check_in"])).days
+    except Exception:
+        nights = None
     try:
         raw = pyairbnb.get_price(
             str(room_id),
@@ -231,55 +282,94 @@ def fetch_price(room_id, seg, capacity=None):
             currency="USD",
             language="en",
         )
-        main = raw.get("main") or {}
-        return {"available": True, "adults": adults, "currency": "USD", "raw": main,
-                "capacityLimited": adults < 11}
     except UnavailableError as e:
         return {"available": False, "adults": adults, "reason": str(e)}
     except Exception as e:
         return {"available": False, "adults": adults, "reason": f"error: {e}"}
 
+    main = raw.get("main") or {}
+    price = main.get("price")
+    total = _num(price.get("amount")) if isinstance(price, dict) else None
+    if total is None:
+        details = main.get("details") or {}
+        candidates = [_num(v) for v in details.values()]
+        candidates = [c for c in candidates if c]
+        if candidates:
+            total = max(candidates)
+    if total is None:
+        for grp in raw.get("raw") or []:
+            if isinstance(grp, dict):
+                p = grp.get("price")
+                total = _num(p.get("amount")) if isinstance(p, dict) else None
+                if total:
+                    break
+    per_night = round(total / nights, 2) if total and nights else None
+    per_person = round(per_night / group, 2) if per_night else None
+    return {
+        "available": True, "adults": adults, "currency": "USD",
+        "total": total, "nights": nights, "perNight": per_night,
+        "perPersonPerNight": per_person,
+        "qualifier": main.get("qualifier"),
+        "breakdown": main.get("details"),
+        "capacityLimited": adults < group,
+        "raw": main,
+    }
+
 
 def reverse_geocode(lat, lng):
-    try:
-        r = _SESSION.get(f"{NOMINATIM}/reverse", params={
-            "format": "jsonv2", "lat": lat, "lon": lng, "addressdetails": 1, "accept-language": "es",
-        }, timeout=20)
-        r.raise_for_status()
-        data = r.json()
-        addr = data.get("address", {})
-        district = _norm(addr.get("city_district") or addr.get("suburb") or addr.get("town")
-                         or addr.get("village") or addr.get("municipality") or addr.get("county")
-                         or addr.get("city") or "")
-        return {
-            "display": data.get("display_name", ""),
-            "district": district,
-            "city": addr.get("city") or addr.get("town") or addr.get("municipality") or "",
-            "neighbourhood": addr.get("neighbourhood") or addr.get("suburb") or "",
-            "state": addr.get("state") or "",
-            "country": addr.get("country") or "",
-        }
-    except Exception as e:
-        return {"error": str(e)}
+    last = None
+    for attempt in range(3):
+        try:
+            r = _SESSION.get(f"{NOMINATIM}/reverse", params={
+                "format": "jsonv2", "lat": lat, "lon": lng, "addressdetails": 1, "accept-language": "es",
+            }, timeout=20)
+            r.raise_for_status()
+            data = r.json()
+            addr = data.get("address", {})
+            district = _norm(addr.get("city_district") or addr.get("suburb") or addr.get("town")
+                             or addr.get("village") or addr.get("municipality") or addr.get("county")
+                             or addr.get("city") or "")
+            return {
+                "display": data.get("display_name", ""),
+                "district": district,
+                "city": addr.get("city") or addr.get("town") or addr.get("municipality") or "",
+                "neighbourhood": addr.get("neighbourhood") or addr.get("suburb") or "",
+                "state": addr.get("state") or "",
+                "country": addr.get("country") or "",
+            }
+        except Exception as e:
+            last = e
+            time.sleep(1.5 * (attempt + 1))
+    return {"error": str(last)}
 
 
 def safety_for(geo):
-    key = geo.get("district", "")
-    score, note = DISTRICT_SAFETY.get(key, DEFAULT_SAFETY)
+    keys = [geo.get("district", ""), _norm(geo.get("city", "")), _norm(geo.get("neighbourhood", "")),
+            _norm(geo.get("state", ""))]
+    score, note = DEFAULT_SAFETY
+    matched = None
+    for key in keys:
+        if key and key in DISTRICT_SAFETY:
+            score, note = DISTRICT_SAFETY[key]
+            matched = key
+            break
     level = "alta" if score >= 8 else "media-alta" if score >= 7 else "media" if score >= 5.5 else "media-baja" if score >= 4 else "baja"
-    return {"score": round(score, 1), "level": level, "note": note, "source": "heuristica por distrito (estimado)"}
+    return {"score": round(score, 1), "level": level, "note": note, "matched": matched,
+            "source": "heuristica por distrito/ciudad (estimado)"}
 
 
 def _route(origin, dest):
-    try:
-        url = f"{OSRM}/route/v1/driving/{origin[1]},{origin[0]};{dest[1]},{dest[0]}"
-        r = _SESSION.get(url, params={"overview": "false"}, timeout=20)
-        data = r.json()
-        if data.get("code") == "Ok" and data.get("routes"):
-            route = data["routes"][0]
-            return {"distanceKm": round(route["distance"] / 1000, 1), "durationMin": round(route["duration"] / 60)}
-    except Exception:
-        pass
+    url = f"{OSRM}/route/v1/driving/{origin[1]},{origin[0]};{dest[1]},{dest[0]}"
+    for attempt in range(3):
+        try:
+            r = _SESSION.get(url, params={"overview": "false"}, timeout=20)
+            data = r.json()
+            if data.get("code") == "Ok" and data.get("routes"):
+                route = data["routes"][0]
+                return {"distanceKm": round(route["distance"] / 1000, 1), "durationMin": round(route["duration"] / 60)}
+        except Exception:
+            pass
+        time.sleep(1.0 * (attempt + 1))
     return None
 
 
@@ -343,19 +433,24 @@ def _categorize(node):
 
 
 def poi_counts(lat, lng, radius=1000):
-    counts = {k: 0 for k in ["gastronomia", "compras", "salud", "transporte", "turismo", "bancos"]}
-    try:
-        r = _SESSION.post(OVERPASS, data={"data": _poi_query(lat, lng, radius)}, timeout=40)
-        r.raise_for_status()
-        for el in r.json().get("elements", []):
-            cat = _categorize(el)
-            if cat:
-                counts[cat] += 1
-    except Exception as e:
-        return {"counts": counts, "total": sum(counts.values()), "error": str(e)}
-    total = sum(counts.values())
-    walk = min(10.0, round(2.2 * math.log(1 + total), 1))
-    return {"counts": counts, "total": total, "walkScore": walk, "radiusM": radius}
+    last = None
+    for attempt in range(3):
+        counts = {k: 0 for k in ["gastronomia", "compras", "salud", "transporte", "turismo", "bancos"]}
+        try:
+            r = _SESSION.post(OVERPASS, data={"data": _poi_query(lat, lng, radius)}, timeout=40)
+            r.raise_for_status()
+            for el in r.json().get("elements", []):
+                cat = _categorize(el)
+                if cat:
+                    counts[cat] += 1
+            total = sum(counts.values())
+            walk = min(10.0, round(2.2 * math.log(1 + total), 1))
+            return {"counts": counts, "total": total, "walkScore": walk, "radiusM": radius}
+        except Exception as e:
+            last = e
+            time.sleep(2.0 * (attempt + 1))
+    return {"counts": {k: 0 for k in ["gastronomia", "compras", "salud", "transporte", "turismo", "bancos"]},
+            "total": 0, "error": str(last)}
 
 
 def enrich(listing):

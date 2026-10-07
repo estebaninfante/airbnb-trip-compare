@@ -42,17 +42,13 @@ def _price_ppn(listing, seg):
     p = listing.get("price") or {}
     if not p.get("available"):
         return None
-    main = p.get("raw") or {}
-    price = main.get("price") or {}
-    amount = price.get("amount") if isinstance(price, dict) else None
-    nights = None
-    try:
-        from datetime import date
-        nights = (date.fromisoformat(seg["check_out"]) - date.fromisoformat(seg["check_in"])).days
-    except Exception:
-        nights = None
-    if amount and nights:
-        return round(amount / nights / 11, 1)
+    pp = p.get("perPersonPerNight")
+    if pp is not None:
+        return round(pp, 1)
+    total = p.get("total")
+    nights = p.get("nights")
+    if total and nights:
+        return round(total / nights / 11, 1)
     return None
 
 
@@ -135,12 +131,21 @@ def build_results():
                 "final": final, "votes": len(seg_votes), "breakdown": breakdown,
                 "pricePPN": _price_ppn(l, seg), "safety": (l.get("safety") or {}).get("score"),
                 "district": (l.get("geo") or {}).get("district"), "capacity": l.get("personCapacity"),
+                "bedrooms": l.get("bedrooms"), "beds": l.get("beds"), "baths": l.get("baths"),
+                "priceTotal": (l.get("price") or {}).get("total"),
+                "pricePerNight": (l.get("price") or {}).get("perNight"),
+                "priceAvailable": (l.get("price") or {}).get("available"),
+                "available": bool((l.get("price") or {}).get("available")),
+                "rating": (l.get("rating") or {}).get("overall"),
+                "walkScore": (l.get("pois") or {}).get("walkScore"),
+                "routes": l.get("routes"),
             })
-        scored.sort(key=lambda x: x["final"], reverse=True)
+        scored.sort(key=lambda x: (x["available"], x["final"]), reverse=True)
         for i, s in enumerate(scored):
             s["rank"] = i + 1
+        winner = next((s["id"] for s in scored if s["available"]), None)
         out["segments"].append({"id": seg["id"], "label": seg["label"], "listings": scored,
-                                "winner": scored[0]["id"] if scored else None})
+                                "winner": winner})
     return out
 
 
@@ -236,9 +241,17 @@ class Handler(BaseHTTPRequestHandler):
             body = self._body()
             url = (body.get("url") or "").strip()
             segment = body.get("segment") or "lima1"
-            addedBy = (body.get("addedBy") or "anonimo").strip()
+            addedBy = (body.get("addedBy") or body.get("person") or "anonimo").strip()
             if "airbnb." not in url:
                 return self._json({"error": "Pega un enlace valido de Airbnb (airbnb.com/rooms/...)"}, 400)
+            try:
+                rid = enrich_mod.parse_airbnb_id(url)
+            except Exception:
+                rid = None
+            existing = next((l for l in store.list_listings()
+                             if (rid and l.get("roomId") == rid) or l.get("url") == url), None)
+            if existing:
+                return self._json({**existing, "duplicate": True}, 200)
             lid = uuid.uuid4().hex[:12]
             listing = {"id": lid, "url": url, "segment": segment, "addedBy": addedBy,
                        "addedAt": store.now_iso(), "status": "enriching", "name": "Procesando..."}
