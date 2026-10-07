@@ -17,6 +17,39 @@ if not os.path.isdir(DIST):
     DIST = FRONTEND
 PORT = int(os.environ.get("PORT", "3000"))
 
+FX_PATH = os.path.join(os.path.dirname(HERE), "data", "fx.json")
+_FX = {"rate": None, "updated": None}
+
+
+def get_fx():
+    import time as _time
+    import urllib.request
+    if _FX["rate"] is None:
+        try:
+            with open(FX_PATH) as f:
+                d = json.load(f)
+            _FX["rate"] = float(d.get("usd_cop"))
+            _FX["updated"] = float(d.get("updated") or 0)
+        except Exception:
+            pass
+    if _FX["rate"] and _FX["updated"] and (_time.time() - _FX["updated"]) < 43200:
+        return _FX
+    try:
+        req = urllib.request.Request("https://open.er-api.com/v6/latest/USD",
+                                     headers={"User-Agent": "airbnb-trip-compare"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.loads(r.read().decode())
+        rate = float(data["rates"]["COP"])
+        _FX["rate"] = rate
+        _FX["updated"] = _time.time()
+        os.makedirs(os.path.dirname(FX_PATH), exist_ok=True)
+        with open(FX_PATH, "w") as f:
+            json.dump({"usd_cop": rate, "updated": _FX["updated"]}, f)
+    except Exception:
+        if not _FX["rate"]:
+            _FX["rate"] = 4000.0
+    return _FX
+
 
 def _clamp(v, lo=0.0, hi=10.0):
     return max(lo, min(hi, v))
@@ -221,7 +254,9 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/api/health":
             return self._json({"ok": True})
         if p == "/api/trip":
-            return self._json({"trip": TRIP, "anchors": ANCHOR_SETS, "criteria": CRITERIA})
+            fx = get_fx()
+            return self._json({"trip": TRIP, "anchors": ANCHOR_SETS, "criteria": CRITERIA,
+                               "fx": {"usd_cop": fx["rate"], "updated": fx["updated"]}})
         if p == "/api/listings":
             return self._json({"listings": list(store.all_data()["listings"].values())})
         if p == "/api/results":

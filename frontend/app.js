@@ -16,6 +16,7 @@ const state = {
   markers: [],
   poll: null,
   weights: {},
+  fx: 4000,
 };
 
 const app = document.getElementById("app");
@@ -54,6 +55,11 @@ function person() {
 function fmtMoney(value, digits) {
   if (value == null) return "—";
   return "$" + Number(value).toLocaleString("en-US", { minimumFractionDigits: digits || 0, maximumFractionDigits: digits || 0 });
+}
+
+function cop(usd) {
+  if (usd == null) return "—";
+  return "$" + Math.round(Number(usd) * (state.fx || 4000)).toLocaleString("es-CO") + " COP";
 }
 
 function fmtDate(iso) {
@@ -100,6 +106,7 @@ async function loadAll() {
     api("/trip"), api("/listings"), api("/results"), api("/votes"),
   ]);
   state.trip = trip.trip;
+  if (trip.fx && trip.fx.usd_cop) state.fx = trip.fx.usd_cop;
   state.anchors = trip.anchors || {};
   state.criteria = trip.criteria || results.criteria || [];
   state.listings = listings.listings || [];
@@ -110,6 +117,8 @@ async function loadAll() {
     const withItems = state.trip.segments.find((s) => (results.segments.find((r) => r.id === s.id) || {}).listings && (results.segments.find((r) => r.id === s.id) || {}).listings.length);
     state.segment = (withItems || state.trip.segments[0]).id;
   }
+  const dm = location.hash.match(/^#d=([\w-]+)/);
+  if (dm && state.listings.some((l) => l.id === dm[1])) state.detail = dm[1];
   render();
   schedulePoll();
 }
@@ -193,7 +202,7 @@ function cardHTML(row) {
   const img = row.image || (l.images || [])[0];
     const price = row.priceAvailable === false
       ? `<span class="chip">Precio no disponible</span>`
-    : (row.pricePPN != null ? `<div class="card-price">${fmtMoney(row.pricePPN, 1)} <small>/ persona · noche</small></div>` : "");
+    : (row.pricePPN != null ? `<div class="card-price">${cop(row.pricePPN)} <small>/ persona · noche</small></div>` : "");
   const rooms = [row.bedrooms ? `${row.bedrooms} hab` : null, row.beds ? `${row.beds} camas` : null, row.baths ? `${row.baths} baños` : null].filter(Boolean).join(" · ");
   return `
     <article class="card" data-detail="${row.id}">
@@ -258,7 +267,7 @@ function tableHTML(rows) {
             ${th("name", "Alojamiento")}
             ${th("capacity", "Cap.")}
             <th class="no-sort">Hab · Camas · Baños</th>
-            ${th("pricePPN", "USD/ppn")}
+            ${th("pricePPN", "COP/ppn")}
             ${th("rating", "Rating")}
             ${th("safety", "Seguridad")}
             ${th("walkScore", "Entorno")}
@@ -284,7 +293,7 @@ function tableHTML(rows) {
               </td>
               <td class="num">${row.capacity || "—"}</td>
               <td class="num">${row.bedrooms || "—"} · ${row.beds || "—"} · ${row.baths || "—"}</td>
-              <td class="num">${row.priceAvailable === false ? "<span class='chip'>n/d</span>" : fmtMoney(row.pricePPN, 1)}</td>
+              <td class="num">${row.priceAvailable === false ? "<span class='chip'>n/d</span>" : cop(row.pricePPN)}</td>
               <td class="num">${row.rating != null ? Number(row.rating).toFixed(2) : "—"}</td>
               <td class="num">${row.safety != null ? Number(row.safety).toFixed(1) : "—"}</td>
               <td class="num">${row.walkScore != null ? Number(row.walkScore).toFixed(1) : "—"}</td>
@@ -357,10 +366,11 @@ function detailHTML() {
   const myVote = votes.find((v) => v.person === me);
   const canVote = !!me;
   return `
-    <div class="panel">
-      <div class="panel-head">
+    <div class="modal-backdrop" id="modal-backdrop">
+      <div class="modal" role="dialog" aria-modal="true" aria-label="Detalle del alojamiento">
+      <div class="modal-head">
         <div class="panel-title">Detalle</div>
-        <button class="btn btn-sm btn-ghost" id="close-detail">Cerrar</button>
+        <button class="btn btn-sm btn-ghost" id="close-detail">Cerrar ✕</button>
       </div>
       ${images.length ? `<div style="display:grid;grid-template-columns:repeat(${images.length},1fr);gap:6px;border-radius:12px;overflow:hidden">${images.map((u) => `<img src="${esc(u)}" style="width:100%;height:88px;object-fit:cover" alt="" />`).join("")}</div>` : ""}
       <h3 style="margin-top:12px;font-size:var(--fs-lg)">${esc(l.name || row.name || "Sin nombre")}</h3>
@@ -376,8 +386,8 @@ function detailHTML() {
       </div>
       ${row.priceAvailable === false
         ? `<div class="inline-msg" style="color:var(--warn)">Precio no disponible para estas fechas (${esc((l.price && l.price.reason) || "")}).</div>`
-        : `<div style="margin-top:10px;font-weight:700">${fmtMoney(row.pricePPN, 1)} <small class="muted" style="font-weight:400">/ persona · noche</small></div>
-           <div class="muted" style="font-size:var(--fs-sm)">Total ${fmtMoney(row.priceTotal, 0)} · ${fmtMoney(row.pricePerNight, 0)}/noche</div>`}
+        : `<div style="margin-top:10px;font-weight:700">${cop(row.pricePPN)} <small class="muted" style="font-weight:400">/ persona · noche</small></div>
+           <div class="muted" style="font-size:var(--fs-sm)">Total ${cop(row.priceTotal)} · ${cop(row.pricePerNight)}/noche</div>`}
       ${routes ? `<div class="detail"><h4>Tiempos a puntos clave</h4><div class="routes">${routes}</div></div>` : ""}
       ${amenities ? `<div class="detail"><h4>Servicios</h4><div class="amenities">${amenities}</div></div>` : ""}
       <div class="detail">
@@ -396,6 +406,7 @@ function detailHTML() {
         </div>
       </div>
       <div style="margin-top:12px"><a class="btn btn-sm btn-ghost" href="${esc(l.url || "#")}" target="_blank" rel="noopener">Abrir en Airbnb ↗</a></div>
+      </div>
     </div>`;
 }
 
@@ -444,7 +455,6 @@ function layoutHTML() {
           </div>
         </div>
         <aside class="col-side">
-          ${detailHTML()}
           ${winnerHTML()}
           ${mapPanelHTML()}
           ${weightsHTML()}
@@ -454,7 +464,7 @@ function layoutHTML() {
 }
 
 function render() {
-  app.innerHTML = topbarHTML() + layoutHTML();
+  app.innerHTML = topbarHTML() + layoutHTML() + detailHTML();
   bind();
   renderMap();
 }
@@ -479,9 +489,10 @@ function bind() {
     ev.preventDefault();
     state.detail = el.dataset.detail;
     render();
-    const aside = app.querySelector(".col-side");
-    if (aside) aside.scrollIntoView({ behavior: "smooth", block: "start" });
   }));
+  const backdrop = app.querySelector("#modal-backdrop");
+  if (backdrop) backdrop.addEventListener("click", (ev) => { if (ev.target === backdrop) { state.detail = null; render(); } });
+  document.onkeydown = (ev) => { if (ev.key === "Escape" && state.detail) { state.detail = null; render(); } };
   const close = app.querySelector("#close-detail");
   if (close) close.addEventListener("click", () => { state.detail = null; render(); });
 
@@ -602,7 +613,7 @@ function renderMap() {
       fillOpacity: 0.95,
       weight: 2,
     }).addTo(state.map);
-    marker.bindPopup(`<b>#${row.rank} · ${esc(row.name || "")}</b><br>${esc(row.district || "")}${row.pricePPN != null ? "<br>" + fmtMoney(row.pricePPN, 1) + "/pers·noche" : ""}`);
+    marker.bindPopup(`<b>#${row.rank} · ${esc(row.name || "")}</b><br>${esc(row.district || "")}${row.pricePPN != null ? "<br>" + cop(row.pricePPN) + "/pers·noche" : ""}`);
     state.markers.push(marker);
   });
   if (rows.length) {
